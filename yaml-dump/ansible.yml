@@ -1,0 +1,160 @@
+- name: Create EC2 instance # Nom de la tâche Ansible
+  hosts: localhost # La tâche sera exécutée depuis votre machine locale
+  connection: local # La connexion à 'localhost' se fera en local 
+  gather_facts: true #  Collecte des informations sur la machine 'localhost'
+  tasks: # Liste des tâches à effectuer
+    - name: create security group # Nom de la tâche 
+      amazon.aws.ec2_group: # Module Ansible pour gérer les groupes de sécurité EC2
+        name: my_security_group # Nom du groupe de sécurité
+        description: Security Group for EC2 instance # Description du groupe
+        rules: # Règles du groupe de sécurité
+          - proto: tcp # Protocole: TCP
+            ports: # Liste des ports ouverts
+              - 22 # Port SSH
+              - 80 # Port HTTP
+              - 8080 # Port alternatif HTTP
+            cidr_ip: 0.0.0.0/0 # Ouvre les ports à tout le monde (0.0.0.0/0)
+        region: eu-west-3 # Région AWS où le groupe de sécurité sera créé
+
+    - name: launching ec2 # Nom de la tâche
+      amazon.aws.ec2_instance: # Module Ansible pour gérer les instances EC2
+        name: "myEC5instance" # Nom de l'instance EC2
+        instance_type: t2.medium # Type d'instance EC2
+        key_name: f # Nom de la paire de clés SSH pour se connecter à l'instance
+        image_id: ami-00ac45f3035ff009e # ID de l'AMI (Amazon Machine Image) pour l'instance
+        region: eu-west-3 # Région AWS où l'instance sera lancée
+        security_group: my_security_group # Nom du groupe de sécurité à attacher
+        count: 1 # Nombre d'instances à lancer (ici, une seule)
+        vpc_subnet_id: subnet-0fa822e1145be418e # ID du sous-réseau VPC où lancer l'instance
+        wait: yes # Attendre que l'instance soit lancée avant de passer à la tâche suivante
+        volumes: # Configuration des volumes à attacher
+          - device_name: /dev/sdb # Point de montage du volume sur l'instance
+            ebs: # Configuration du volume EBS
+              volume_size: 8 # Taille du volume en Go
+              delete_on_termination: true # Supprimer le volume si l'instance est terminée
+        tags: # Tags à attacher à l'instance
+          Name: myec2instance # Nom du tag 'Name'
+        network: # Configuration réseau de l'instance
+          public_ip: yes # Attribuer une adresse IP publique à l'instance
+        instance_initiated_shutdown_behavior: stop # Arrêter l'instance si un arrêt est initié depuis l'instance
+        termination_protection: no # Ne pas activer la protection contre la suppression accidentelle
+      register: ec2 # Enregistrer le résultat de la création de l'instance dans une variable 'ec2'
+
+    - name: Save EC2 instance information to JSON file # Nom de la tâche
+      ansible.builtin.copy: # Module Ansible pour copier des fichiers
+        content: "{{ ec2.instances[0].network_interfaces[0].association.public_ip }}" # Contenu du fichier: adresse IP publique de l'instance (extraite de la variable 'ec2')
+        dest: data.json # Destination du fichier: data.json
+
+    - name: Ajouter L'instances à l'inventaire # Nom de la tâche
+      ansible.builtin.add_host: # Module Ansible pour ajouter dynamiquement des hôtes à l'inventaire
+        hostname: "{{ ec2.instances[0].network_interfaces[0].association.public_ip }}" # Nom d'hôte: adresse IP publique de l'instance
+        groupname: ec2hosts # Groupe d'inventaire: ec2hosts
+        ansible_ssh_private_key_file: ~/.ssh/f.pem # Chemin vers la clé privée SSH pour se connecter à l'instance
+        ansible_user: ubuntu # Nom d'utilisateur SSH pour se connecter à l'instance
+
+    - name: Attendre que SSH soit prêt # Nom de la tâche
+      ansible.builtin.wait_for: # Module Ansible pour attendre un état spécifique
+        host: "{{ ec2.instances[0].network_interfaces[0].association.public_ip }}" # Hôte sur lequel attendre
+        port: 22 # Port à vérifier
+        delay: 10 # Délai initial avant la première vérification
+        timeout: 320 # Durée maximale d'attente
+        state: started # Attendre que le port soit ouvert (état 'started')
+
+# Définition du playbook
+- name: Installer docker et microk8s sur une instance distante
+  hosts: ec2hosts  # Cible le groupe d'hôtes 'ec2hosts' défini précédemment
+  become: true  # Exécute les commandes en tant que root (sudo)
+  gather_facts: false  # Désactive la collecte d'informations sur l'hôte
+  
+  # Définition des variables
+  vars:
+    ansible_ssh_private_key_file: ~/.ssh/f.pem  # Chemin vers la clé privée SSH
+    ansible_user: ubuntu  # Nom d'utilisateur SSH
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'  # Options SSH pour désactiver la vérification stricte des clés d'hôtes
+    num_pods: 3  # Nombre de pods à créer
+    num_containers: 1  # Nombre de conteneurs par pod
+    container_image: nginx:latest  # Image Docker à utiliser pour les conteneurs
+    request_memory: 64Mi  # Mémoire demandée par conteneur
+    request_cpu: 250m  # CPU demandé par conteneur
+
+  # Définition des tâches
+  tasks:
+    - name: Mise à jour de la liste des paquets
+      apt:
+        name: "*"  # Met à jour tous les paquets
+        state: latest  # Met à jour vers la dernière version disponible
+
+    - name: Include docker&microk8s installation tasks
+      include_tasks: kubernetes_install.yml  # Inclut un autre fichier YAML contenant les tâches d'installation de Docker et MicroK8s
+
+    - name: Attendre que MicroK8s soit prêt
+      command: microk8s.status --wait-ready  # Attend que MicroK8s soit complètement opérationnel
+      become: yes  # Exécute la commande en tant que root
+
+    - name: Vérifier l'état de MicroK8s
+      command: microk8s.inspect  # Affiche des informations détaillées sur l'état de MicroK8s
+      register: microk8s_inspect  # Enregistre la sortie de la commande dans une variable 'microk8s_inspect'
+      become: yes  # Exécute la commande en tant que root
+
+    # Création du fichier YAML pour les pods et conteneurs
+    - name: Créer le fichier YAML pour les pods et conteneurs
+      copy:
+        dest: /home/ubuntu/pods.yaml  # Chemin de destination du fichier YAML
+        content: |  # Contenu du fichier YAML (définition des pods et conteneurs)
+          {% for pod_index in range(1, num_pods + 1) %}
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: pod-example-{{ pod_index }}  # Nom du pod (généré dynamiquement)
+          spec:
+            containers:
+          {% for container_index in range(1, num_containers + 1) %}
+            - name: container-example-{{ pod_index }}-{{ container_index }}  # Nom du conteneur (généré dynamiquement)
+              image: {{ container_image }}  # Image Docker à utiliser
+              resources:
+              requests:
+                memory: "{{ request_memory }}"  # Mémoire demandée
+                cpu: "{{ request_cpu }}"  # CPU demandé
+              limits:
+                memory: "128Mi"  # Limite de mémoire
+                cpu: "500m"  # Limite de CPU
+              command: [ "sleep", "infinity" ] # Maintient le conteneur ubuntu en cours d'exécution    
+          {% endfor %}
+          ---
+          {% endfor %}
+              
+    # Déploiement des pods et conteneurs
+    - name: Appliquer le fichier YAML pour créer les pods et conteneurs
+      command: microk8s.kubectl apply --validate=false --request-timeout=60s -f /home/ubuntu/pods.yaml  # Applique le fichier YAML pour créer les pods et conteneurs
+      become: yes  # Exécute la commande en tant que root
+      register: kubectl_apply_result  # Enregistre le résultat de la commande dans une variable
+      retries: 3  # Réessaye la commande 3 fois en cas d'échec
+      delay: 60  # Attend 60 secondes entre chaque essai
+      until: kubectl_apply_result.rc == 0  # Continue si le code de retour de la commande est 0 (succès)
+
+    # Vérification du statut des pods
+    - name: Attendre que les pods soient en statut Running
+      command: >  # Exécute une boucle qui vérifie le statut des pods toutes les 10 secondes
+        bash -c 'while [[ $(microk8s.kubectl get pods -o jsonpath="{.items[*].status.phase}" | grep -v "Running") ]]; do echo "Waiting for pods to be in Running state"; sleep 10; done'
+      become: yes  # Exécute la commande en tant que root
+
+    - name: Vérifier l'état des pods
+      command: microk8s.kubectl get pods  # Affiche l'état des pods
+      register: pod_status  # Enregistre la sortie de la commande dans une variable 'pod_status'
+      become: yes  # Exécute la commande en tant que root
+
+    - debug:
+        var: pod_status.stdout_lines  # Affiche le contenu de la variable 'pod_status.stdout_lines'
+
+    # Installation et lancement de ttyd
+    - name: Installer ttyd  # Installe le paquet 'ttyd'
+      ansible.builtin.apt:
+        name: ttyd
+        state: present
+      become: yes  # Exécute la commande en tant que root
+
+    - name: Lancer ttyd pour exposer le terminal sur le port 8080
+      shell: ttyd --writable -p 8080 tmux &  # Lance ttyd en arrière-plan pour exposer un terminal accessible via un navigateur web
+      async: 10  # Définit un délai d'attente maximal de 10 secondes pour la commande
+      poll: 0  # Désactive le polling pour la commande asynchrone
+      become: yes  # Exécute la commande en tant que root

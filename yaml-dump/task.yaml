@@ -1,0 +1,73 @@
+---
+- name: Create EC2 instance
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks: 
+  - name: create security group
+    amazon.aws.ec2_group:
+       name: my_security_group
+       description: Security Group for EC2 instance 
+       rules: 
+         - proto: tcp
+           ports:
+             - 22
+             - 80
+           cidr_ip: 0.0.0.0/0
+       region: eu-west-3
+  - name: launching ec2
+    amazon.aws.ec2_instance:
+       name: "myEC5instance" 
+       instance_type: t2.micro
+       key_name: f
+       image_id: ami-00ac45f3035ff009e
+       region: eu-west-3
+       security_group: my_security_group
+       count: 1
+       vpc_subnet_id: subnet-0847079aa91b814af
+       wait: yes
+       volumes: 
+          - device_name: /dev/sdb
+            ebs: 
+              volume_size: 8
+              delete_on_termination: true
+       tags: 
+          Name: myec2instance
+       network: 
+          public_ip: yes
+       instance_initiated_shutdown_behavior: stop
+       termination_protection: no
+    register: ec2
+  - name: Ajouter L'instances à l'inventaire
+    ansible.builtin.add_host:
+      hostname: "{{ item.network_interfaces[0].association.public_ip }}"
+      groupname: ec2hosts
+      ansible_ssh_private_key_file: ~/.ssh/f.pem
+      ansible_user: ubuntu
+    loop: "{{ ec2.instances }}"
+    
+  - name: Attendre que SSH soit prêt 
+    ansible.builtin.wait_for:
+      host: "{{ item.network_interfaces[0].association.public_ip }}"
+      port: 22 
+      delay: 100
+      timeout: 320
+      state: started
+    loop: "{{ ec2.instances }}"
+
+- name: Installer docker et microk8s sur une instance distante
+  hosts: ec2hosts
+  become: true
+  gather_facts: false
+  vars:
+    ansible_ssh_private_key_file: ~/.ssh/f.pem
+    ansible_user: ubuntu
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  tasks:
+    - name: Mise à jour de la liste des paquets
+      apt:
+        name: "*"
+        state: latest
+
+    - name: Include docker&microk8s installation tasks
+      include: kubernetes_install.yml

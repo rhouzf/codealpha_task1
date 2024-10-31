@@ -1,0 +1,24 @@
+- name: Choose and run Docker containers
+  hosts: ec2hosts
+  gather_facts: false
+  become: true
+  vars:
+    image_name: "{{ image_choice_var }}"
+    container_count: "{{ container_count_var }}"
+  
+  tasks:
+    - name: Pull the chosen Docker image
+      community.general.docker_image:
+        name: "{{ image_name }}"
+        source: pull
+    
+    - name: Run the Docker containers
+      community.general.docker_container:
+        name: "mycontainer_{{ item }}"
+        image: "{{ image_name }}"
+        state: started
+        ports:
+          - "80{{ 80 + item }}:80"
+        restart_policy: always
+      loop: "{{ range(1, container_count | int + 1) }}"
+

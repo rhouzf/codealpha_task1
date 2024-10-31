@@ -1,0 +1,56 @@
+---
+- name: Create EC2 instance et installer Docker
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks: 
+  - name: create security group
+    amazon.aws.ec2_group:
+       name: my_security_group
+       description: Security Group for EC2 instance 
+       rules: 
+         - proto: tcp
+           ports:
+             - 22
+             - 80
+           cidr_ip: 0.0.0.0/0
+       region: eu-west-1
+  - name: launching ec2
+    amazon.aws.ec2_instance:
+       name: "myEC5instance" 
+       instance_type: t3.micro
+       key_name: f
+       image_id: ami-0111c5910da90c2a7
+       region: eu-west-1
+       security_group: my_security_group
+       count: 1
+       vpc_subnet_id: subnet-076209c57ebf3a19a
+       wait: yes
+       volumes: 
+          - device_name: /dev/sdb
+            ebs: 
+              volume_size: 8
+              delete_on_termination: true
+       tags: 
+          Name: myec2instance
+       network: 
+          public_ip: yes
+       instance_initiated_shutdown_behavior: stop
+       termination_protection: no
+    register: ec2
+  - name: Ajouter L'instances à l'inventaire
+    ansible.builtin.add_host:
+      hostname: "{{ item.network_interfaces[0].association.public_ip }}"
+      groupname: ec2hosts
+      ansible_ssh_private_key_file: ~/.ssh/f.pem
+      ansible_user: ec2-user
+    loop: "{{ ec2.instances }}"
+    
+  - name: Attendre que SSH soit prêt 
+    ansible.builtin.wait_for:
+      host: "{{ item.network_interfaces[0].association.public_ip }}"
+      port: 22 
+      delay: 100
+      timeout: 320
+      state: started
+    loop: "{{ ec2.instances }}"

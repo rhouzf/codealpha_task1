@@ -1,0 +1,66 @@
+- name: Créer une instance EC2 et lancer des conteneurs ECS
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Lancer une instance EC2
+      amazon.aws.ec2_instance:
+        name: my-ecs-instance
+        instance_type: t2.micro
+        key_name: f
+        image_id: ami-0111c5910da90c2a7
+        region: eu-west-3
+        security_group: my_security_group
+        count: 1
+        vpc_subnet_id: subnet-076209c57ebf3a19a
+        wait: yes
+        user_data: |
+            #!/bin/bash
+            echo ECS_CLUSTER=my-ecs-cluster >> /etc/ecs/ecs.config
+            service ecs start
+        volumes:
+          - device_name: /dev/sdb
+            ebs:
+              volume_size: 8
+              delete_on_termination: true
+        tags:
+          Name: my-ecs-instance
+        network:
+          public_ip: yes
+        instance_initiated_shutdown_behavior: stop
+        termination_protection: no
+      register: ec2_instance
+   
+    - name: Créer la définition de tâche ECS
+      community.aws.ecs_taskdefinition: 
+        family: my-task-definition
+        containers:
+          - name: my-container-1
+            image: nginx:latest
+            cpu: 512
+            memory: 1024
+            portMappings:
+              - containerPort: 80
+                hostPort: 80
+                protocol: tcp
+          - name: my-container-2
+            image: nginx:latest
+            cpu: 512
+            memory: 1024
+            portMappings:
+              - containerPort: 8080
+                hostPort: 8080
+                protocol: tcp
+        region: eu-west-3
+        state: present
+      register: task_definition
+
+    - name: Créer le service ECS
+      community.aws.ecs_service:
+        name: my-ecs-service 
+        cluster: my-ecs-cluster
+        task_definition: my-task-definition
+        desired_count: 3
+        state: present
+        region: eu-west-3
+        

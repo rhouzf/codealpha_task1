@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="index.css" class="i">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <form class="z" id="monFormulaire" action="a.php" method="POST" >
+      <div class="x">
+        <!-- Vos champs de formulaire ici -->
+        <h2 class="A">bienvenue </h2>
+        <p class="B">pour creer une instance veuillez remplir cette formulaire!</p>
+        <label for="instance_type">Type d'instance:</label>
+        <input type="text" id="instance_type" name="instance_type" required><br><br>
+        
+        <label for="image_id">ID de l'image:</label>
+        <input type="text" id="image_id" name="image_id" required><br><br>
+        
+        <label for="region">Région:</label>
+        <input type="text" id="region" name="region" required><br><br>
+        
+        <label for="ansible_user">donner l'ansible user de votre image:</label>
+        <input type="text" id="ansible_user" name="ansible_user" required><br><br>
+
+        <label for="num_pods">donner le nombre de pods:</label>
+        <input type="number" id="num_pods" name="num_pods" required><br><br>
+
+        <label for="num_containers">donner le nombre de conteneurs:</label>
+        <input type="number" id="num_containers" name="num_containers" required><br><br>
+
+        <label for="container_image">donner l'image de votre conteneurs:</label>
+        <input type="text" id="container_image" name="container_image" required><br><br>
+          
+        <label for="request_memory">donner la memoire en Mi:</label>
+        <input type="text" id="request_memory" name="request_memory" required><br><br>
+
+        <label for="request_cpu">donner le cpu en m:</label>
+        <input type="text" id="request_cpu" name="request_cpu" required><br><br>
+
+
+        <input type="submit" value="Submit">
+      </div>
+    </form>
+    
+    <!-- <script src="/client.js"></script> -->
+    
+</body>
+</html>

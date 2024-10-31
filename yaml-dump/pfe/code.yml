@@ -1,0 +1,67 @@
+---
+- hosts: all  # Définit tous les hôtes sur lesquels ces tâches seront exécutées
+  become: true  # Permet de devenir super-utilisateur (root) pour exécuter les commandes avec les privilèges nécessaires
+  tasks:  # Début des tâches à exécuter
+    - name: Télécharger Prometheus YAML  # Nom de la tâche : Télécharger le fichier YAML de configuration de Prometheus
+      get_url:  # Module Ansible pour télécharger des fichiers depuis une URL
+        url: https://raw.githubusercontent.com/prometheus/prometheus/main/documentation/examples/prometheus-kubelet-config.yaml  # URL du fichier YAML de Prometheus
+        dest: /tmp/prometheus.yaml  # Destination où le fichier YAML téléchargé sera sauvegardé sur l'hôte distant
+    
+    - name: Déployer Prometheus  # Nom de la tâche : Déployer Prometheus dans le cluster Kubernetes
+      kubernetes.core.k8s:  # Module Ansible pour interagir avec Kubernetes
+        state: present  # Indique que l'objet Kubernetes doit être présent (déployé s'il ne l'est pas déjà)
+        src: /tmp/prometheus.yaml  # Source du fichier YAML à déployer dans Kubernetes
+
+    - name: Créer le service NodePort pour Prometheus  # Nom de la tâche : Créer un service NodePort pour exposer Prometheus
+      kubernetes.core.k8s:  # Module Ansible pour interagir avec Kubernetes
+        definition:  # Définition de l'objet Kubernetes à créer
+          apiVersion: v1  # Version de l'API Kubernetes
+          kind: Service  # Type d'objet : Service
+          metadata:  # Métadonnées du service
+            name: prometheus-np  # Nom du service : prometheus-np
+          spec:  # Spécifications du service
+            type: NodePort  # Type de service : NodePort (expose le service sur un port fixe sur chaque nœud)
+            ports:  # Liste des ports exposés par le service
+              - port: 9090  # Port du service dans Kubernetes
+                targetPort: 9090  # Port cible des pods de Prometheus
+                nodePort: 30001  # Port du nœud Kubernetes où le service sera accessible (choisissez un port disponible)
+            selector:  # Sélecteur pour les pods cibles du service
+              app: prometheus  # Sélectionne les pods ayant l'étiquette 'app: prometheus'
+
+    - name: Afficher l'adresse IP et le port du service Prometheus  # Nom de la tâche : Afficher l'URL pour accéder à Prometheus
+      debug:  # Module Ansible pour afficher des messages de débogage
+        msg: "Prometheus est accessible sur http://{{ ansible_host }}:30001"  # Message à afficher, montrant l'URL d'accès à Prometheus
+
+
+
+- name: Ajouter source de données Prometheus dans Grafana
+  vars:
+    grafana_url: "http://grafana.yourdomain.com"  # Remplacez par l'URL de votre instance Grafana
+    grafana_api_key: "your_grafana_api_key_here"  # Remplacez par votre clé d'API Grafana
+  tasks:
+    - name: Ajouter Prometheus comme source de données dans Grafana
+      uri:
+        url: "{{ grafana_url }}/api/datasources"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ grafana_api_key }}"
+        body_format: json
+        body:
+          name: "Prometheus"
+          type: "prometheus"
+          access: "proxy"  # Ou "direct" selon votre configuration
+          url: "http://prometheus-np:9090"  # URL de l'API Prometheus
+          jsonData:
+            timeInterval: "5s"
+          isDefault: true
+        status_code: 200
+      register: result
+
+    - debug:
+        var: result
+
+
+
+
+
